@@ -17,7 +17,7 @@ import sys
 import numpy as np
 import cv2
 import mediapipe as mp
-
+# https://ai.google.dev/edge/mediapipe/solutions/vision/hand_landmarker/python
 from mediapipe.tasks import python
 from mediapipe.tasks.python import vision
 from model import KeyPointClassifier
@@ -112,7 +112,9 @@ def draw_hand_sign(rgb_image, detection_result, keypoint_classifier, keypoint_cl
     
     return annotated_image
 
-def run(model: str, camera_id: int, width: int, height: int):
+def run(model: str, camera_id: int, width: int, height: int,
+        num_hands: int, min_hand_detection_confidence: float, 
+        min_hand_presence_confidence: float, min_tracking_confidence: float):
     """Continuously run inference on images acquired from the camera.
 
     Args:
@@ -120,6 +122,10 @@ def run(model: str, camera_id: int, width: int, height: int):
         camera_id: The camera id to be passed to OpenCV.
         width: The width of the frame captured from the camera.
         height: The height of the frame captured from the camera.
+        num_hands: The maximum number of hands detected by the Hand landmark detector.
+        min_hand_detection_confidence: The minimum confidence score for the hand detection to be considered successful in palm detection model.
+        min_hand_presence_confidence: The minimum confidence score for the hand presence score in the hand landmark detection model.
+        min_tracking_confidence: The minimum confidence score for the hand tracking to be considered successful.
     """
     
     # Variables to calculate FPS
@@ -151,10 +157,10 @@ def run(model: str, camera_id: int, width: int, height: int):
     base_options = python.BaseOptions(model_asset_path=model)
     options = vision.HandLandmarkerOptions(base_options=base_options,
                                            running_mode=vision.RunningMode.LIVE_STREAM,
-                                           num_hands=2,
-                                           min_hand_detection_confidence=0.3,
-                                           min_hand_presence_confidence=0.3,
-                                           min_tracking_confidence=0.3,
+                                           num_hands=num_hands,
+                                           min_hand_detection_confidence=min_hand_detection_confidence,
+                                           min_hand_presence_confidence=min_hand_presence_confidence,
+                                           min_tracking_confidence=min_tracking_confidence,
                                            result_callback=visualize_callback)
     detector = vision.HandLandmarker.create_from_options(options)
 
@@ -233,23 +239,49 @@ def main():
         required=False,
         default='model/hand_landmarker/hand_landmarker.task')
     parser.add_argument(
-        "--camera-id", help='Id of camera.', required=False, type=int, default=0)
+        "--camera_id", help='Id of camera.', required=False, type=int, default=0)
     parser.add_argument(
-      '--frame-width',
+      '--frame_width',
       help='Width of frame to capture from camera.',
       required=False,
       type=int,
       default=1280)
     parser.add_argument(
-      '--frame-height',
+      '--frame_height',
       help='Height of frame to capture from camera.',
       required=False,
       type=int,
       default=720)
+    parser.add_argument(
+      '--num_hands',
+      help='The maximum number of hands detected by the Hand landmark detector.',
+      required=False,
+      type=int,
+      default=1)
+    parser.add_argument(
+      '--min_hand_detection_confidence',
+      help='The minimum confidence score for the hand detection to be considered successful in palm detection model.',
+      required=False,
+      type=float,
+      default=0.5)
+    parser.add_argument(
+      '--min_hand_presence_confidence',
+      help='The minimum confidence score for the hand presence score in the hand landmark detection model.',
+      required=False,
+      type=float,
+      default=0.5)
+    parser.add_argument(
+      '--min_tracking_confidence',
+      help='The minimum confidence score for the hand tracking to be considered successful.',
+      required=False,
+      type=float,
+      default=0.5)
 
     args = parser.parse_args()
 
-    run(args.model, int(args.camera_id), args.frame_width, args.frame_height)
+    run(args.model, int(args.camera_id), args.frame_width, args.frame_height,
+        args.num_hands, args.min_hand_detection_confidence, 
+        args.min_hand_presence_confidence, args.min_tracking_confidence)
 
 
 if __name__ == "__main__":
