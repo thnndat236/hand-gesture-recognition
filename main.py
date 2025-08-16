@@ -9,17 +9,108 @@
 
 import argparse
 import copy
+import itertools
+import csv
 import time
 import sys
 
+import numpy as np
 import cv2
 import mediapipe as mp
 
 from mediapipe.tasks import python
 from mediapipe.tasks.python import vision
+from model import KeyPointClassifier
 
-from utils import draw_landmarks_on_image
+from utils import draw_landmarks_on_image, draw_bounding_rect, draw_info_text
 
+KEYPOINT_CLASSIFIER_LABEL = 'model/keypoint_classifier/keypoint_classifier_label.csv'
+
+
+def calc_bounding_rect(image, landmarks):
+    image_width, image_height = image.shape[1], image.shape[0]
+
+    landmark_array = np.empty((0, 2), int)
+
+    for _, landmark in enumerate(landmarks):
+        landmark_x = min(int(landmark.x * image_width), image_width)
+        landmark_y = min(int(landmark.y * image_height), image_height)
+
+        landmark_point = [np.array((landmark_x, landmark_y))]
+        landmark_array = np.append(landmark_array, landmark_point, axis=0)
+
+    x, y, w, h = cv2.boundingRect(landmark_array)
+    
+    return [x, y, x + w, y + h]
+
+
+def calc_landmark_array(image, landmarks):
+    image_width, image_height = image.shape[1], image.shape[0]
+
+    landmark_array = []
+    for _, landmark in enumerate(landmarks):
+        landmark_x = min(int(landmark.x * image_width), image_width)
+        landmark_y = min(int(landmark.y * image_height), image_height)
+        
+        landmark_array.append([landmark_x, landmark_y])
+
+    return landmark_array
+
+
+def pre_process_landmark(landmark_array):
+    temp_landmark_array = copy.deepcopy(landmark_array)
+
+    # Convert to relative coordinates
+    base_x, base_y = 0, 0
+    for index, landmark in enumerate(landmark_array):
+        if index == 0:
+            base_x, base_y = landmark[0], landmark[1]
+        
+        temp_landmark_array[index][0] -= base_x
+        temp_landmark_array[index][1] -= base_y
+
+    # Convert to a one-dimensional list
+    temp_landmark_array = list(itertools.chain.from_iterable(temp_landmark_array))
+
+    # Normalization
+    max_value = max(list(map(abs, temp_landmark_array)))
+
+    def normalize_(n):
+        return n / max_value
+    
+    temp_landmark_array = list(map(normalize_, temp_landmark_array))
+
+    return temp_landmark_array
+
+
+def draw_hand_sign(rgb_image, detection_result, keypoint_classifier, keypoint_classifier_labels):
+    hand_landmarks_list = detection_result.hand_landmarks
+    handedness_list = detection_result.handedness
+    annotated_image = np.copy(rgb_image)
+
+    # Loop through the detected hands to visualize.
+    for idx in range(len(hand_landmarks_list)):
+        hand_landmarks = hand_landmarks_list[idx]
+        handedness = handedness_list[idx]
+
+        # Bounding box calculation
+        brect = calc_bounding_rect(annotated_image, hand_landmarks)
+        
+        # Landmark calculation
+        landmark_list = calc_landmark_array(annotated_image, hand_landmarks)
+
+        # Convert landmarks to normalized coordinates 
+        pre_processed_landmark_list = pre_process_landmark(landmark_list)
+
+        hand_sign_id = keypoint_classifier(pre_processed_landmark_list)
+        
+        annotated_image = draw_bounding_rect(annotated_image, brect)
+        annotated_image = draw_info_text(annotated_image,
+                                         brect,
+                                         handedness,
+                                         keypoint_classifier_labels[hand_sign_id])
+    
+    return annotated_image
 
 def run(model: str, camera_id: int, width: int, height: int):
     """Continuously run inference on images acquired from the camera.
@@ -67,6 +158,16 @@ def run(model: str, camera_id: int, width: int, height: int):
                                            result_callback=visualize_callback)
     detector = vision.HandLandmarker.create_from_options(options)
 
+    # Keypoint Classifier Model
+    keypoint_classifier = KeyPointClassifier()
+
+    # Read Keypoint Labels
+    with open(KEYPOINT_CLASSIFIER_LABEL, encoding='utf-8-sig') as f:
+        keypoint_classifier_labels = csv.reader(f)
+        keypoint_classifier_labels = [
+            row[0] for row in keypoint_classifier_labels
+        ]
+
     # Continuously capture images from the camera and run inference
     while cap.isOpened():
         success, image = cap.read()
@@ -100,12 +201,16 @@ def run(model: str, camera_id: int, width: int, height: int):
                     font_size, text_color, font_thickness)
 
         if detection_result_list:
-            print(detection_result_list)
+            # print(detection_result_list)
             vis_image = draw_landmarks_on_image(current_frame, detection_result_list[0])
-            cv2.imshow('object_detector', vis_image)
+            vis_image = draw_hand_sign(vis_image,
+                                    detection_result_list[0],
+                                    keypoint_classifier,
+                                    keypoint_classifier_labels)
+            cv2.imshow('hand_landmark_detector', vis_image)
             detection_result_list.clear()
         else:
-            cv2.imshow('object_detector', current_frame)
+            cv2.imshow('hand_landmark_detector', current_frame)
 
         # Stop the program if the ESC key is pressed.
         if cv2.waitKey(1) == 27:
