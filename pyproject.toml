@@ -17,4 +17,5 @@ dependencies = [
     "scikit-learn>=1.7.1",
     "seaborn>=0.13.2",
     "tensorflow>=2.18.1",
+    "websocket>=0.2.1",
 ]
